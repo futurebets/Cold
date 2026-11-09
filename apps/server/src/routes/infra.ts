@@ -3,7 +3,9 @@ import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "../db/client";
 import { badRequest, notFound } from "../lib/http";
-import { audit, getPolicies } from "../services/common";
+import { isProtected } from "@cold/core";
+import { listCloudflareZones } from "../adapters/external";
+import { audit, getPolicies, getProtectedDomains, getSecret } from "../services/common";
 import * as domainsSvc from "../services/domains";
 import { testMailbox } from "../services/lifecycle";
 import { ctx, idParam, parse, z } from "./helpers";
@@ -31,6 +33,37 @@ export async function infraRoutes(app: FastifyInstance) {
     const res = await domainsSvc.addDomains(c.workspaceId, c.actor, body);
     if (body.mailboxes?.length) for (const d of res.created) await domainsSvc.addMailboxes(c.workspaceId, c.actor, d.id, body.mailboxes);
     return res;
+  });
+
+  // Domains already on Cloudflare: list zones so they can be imported in one click.
+  app.get("/api/cloudflare/zones", async (req) => {
+    const c = ctx(req, "operator");
+    const token = await getSecret(c.workspaceId, "cloudflare.token");
+    if (!token) throw badRequest("Connect Cloudflare in Settings → Integrations first (API token with Zone:Read and DNS:Edit).");
+    const zones = await listCloudflareZones(token).catch((e) => Promise.reject(badRequest(`Cloudflare: ${e.message}`)));
+    const existing = new Set((await getDb().select({ name: domains.name }).from(domains).where(eq(domains.workspaceId, c.workspaceId))).map((d) => d.name));
+    const prot = await getProtectedDomains(c.workspaceId);
+    return zones
+      .map((z) => ({ ...z, inCold: existing.has(z.name), protected: isProtected(z.name, prot) }))
+      .sort((a, b) => Number(a.inCold) - Number(b.inCold) || a.name.localeCompare(b.name));
+  });
+
+  // Write + verify DNS for many domains at once through Cloudflare.
+  app.post("/api/domains/bulk-dns", async (req) => {
+    const c = ctx(req, "operator");
+    const { domainIds } = parse(z.object({ domainIds: z.array(z.string()).min(1).max(200) }), req.body);
+    const results = [];
+    for (const id of domainIds) {
+      const d = await domainsSvc.getDomain(c.workspaceId, id);
+      try {
+        const push = await domainsSvc.pushDns(c.workspaceId, id, c.actor);
+        const check = await domainsSvc.checkDns(c.workspaceId, id, c.actor);
+        results.push({ id, name: d.name, ok: true, applied: push.applied, skipped: push.skipped, warnings: push.warnings, pass: check.pass, failing: check.items.filter((i) => !i.pass).map((i) => i.label) });
+      } catch (e: any) {
+        results.push({ id, name: d.name, ok: false, error: String(e?.message ?? e) });
+      }
+    }
+    return results;
   });
 
   app.get("/api/domains/:id", async (req) => {

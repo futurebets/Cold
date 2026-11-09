@@ -10,6 +10,7 @@ import { syncWorkspace } from "../services/inbox";
 import { runLifecycle, testConnections } from "../services/lifecycle";
 import { evaluateWorkspaceHealth } from "../services/health";
 import { resumeStuckImports } from "../services/lists";
+import { planWarmup } from "../services/warmup";
 
 type JobFn = (now: Date) => Promise<unknown>;
 
@@ -31,7 +32,8 @@ const perWorkspace =
 export const JOBS: { name: string; label: string; everyMs: number; run: JobFn }[] = [
   { name: "sender", label: "Send due emails (pre-flight guard + caps)", everyMs: 30_000, run: (now) => runSender(now) },
   { name: "planner", label: "Plan staggered sends", everyMs: 5 * 60_000, run: perWorkspace(planWorkspace) },
-  { name: "inbox", label: "Sync inboxes (replies, bounces)", everyMs: 2 * 60_000, run: perWorkspace(syncWorkspace) },
+  { name: "inbox", label: "Sync inboxes (replies, bounces, warmup)", everyMs: 2 * 60_000, run: perWorkspace(syncWorkspace) },
+  { name: "warmup", label: "Plan built-in warmup emails", everyMs: 10 * 60_000, run: perWorkspace(planWarmup) },
   { name: "lifecycle", label: "Warmup gates, DNS, seeds, rotations", everyMs: 5 * 60_000, run: perWorkspace(runLifecycle) },
   { name: "health", label: "Evaluate domain health", everyMs: 60 * 60_000, run: perWorkspace(evaluateWorkspaceHealth) },
   { name: "connections", label: "Test new mailbox connections", everyMs: 15 * 60_000, run: perWorkspace((ws) => testConnections(ws)) },

@@ -4,6 +4,8 @@ Cold is a cold email deliverability platform. It runs the whole sending infrastr
 
 > protect the primary domain → provision lookalike domains on Google Workspace or Microsoft 365 → authenticate → warm → enforce caps → clean lists → lint copy → stagger sends → measure health against baselines → diagnose copy vs. infrastructure → rotate in warmed replacements without stopping or losing a reply.
 
+It replaces a paid sequencer such as Instantly: sending and sequences, the unified inbox, analytics, inbox rotation and **warmup** are all built in. You pay only for mailboxes, domains, email validation credits and hosting (≈ $12–35/month on Cloudflare).
+
 The product spec is in [`SPEC.md`](SPEC.md). Its Appendix A maps every playbook rule to the requirements that implement it.
 
 ---
@@ -21,6 +23,7 @@ The product spec is in [`SPEC.md`](SPEC.md). Its Appendix A maps every playbook 
 | **Health** | Verdicts on the latest 1,000 sends that are at least 48 hours old, against each domain's own baseline (or its peers'). Red = reply < 1% **and** bounce > 3%: the domain pauses automatically and a diagnosis opens. Circuit breakers catch spam-block bursts, bad lists and blocklist hits. |
 | **Diagnosis** | Re-checks auth and blocklists, analyzes the bounce mix, then sends neutral control copy and campaign copy from the same inboxes to seed inboxes and reads where each landed. Verdicts: COPY / INFRA / LIST / OFFER / AUTH. Results can also be entered manually from an external placement tool. |
 | **Rotation** | Make-before-break: promotes the best warmed reserve domain, moves in-flight sequences, puts the burned domain in Relay so replies keep arriving, falls back to a 15-day Layover when nothing is ready, and creates a replenishment order. |
+| **Warmup** | Built in, no warmup subscription. Your inboxes exchange natural, link-free emails with inboxes in your *other* tenants (never inside one tenant, where mail is delivered internally and builds no reputation). Volume ramps from 2/day to 20 (Google) or 10 (Microsoft), and drops to half once an inbox sends cold email. Receivers pull warmup mail out of spam, mark it read and reply to ~35%. Where each email lands becomes the inbox's warmup inbox rate, which gates Ready (≥ 90%) and raises an early warning when an active domain's warmup mail starts hitting spam. You can switch to an external warmup tool instead. |
 | **Ops** | Roles (Owner, Operator, SDR, Viewer), audit log, encrypted secrets (AES-256-GCM), Slack alerts, job status page, demo/simulation mode. |
 
 ## Run it
@@ -54,11 +57,13 @@ npm run build       # web + server bundle in apps/server/dist
 2. **Settings → Integrations → Add tenant**:
    - **Microsoft 365** (Hypertide or direct): create an Entra app registration with the Microsoft Graph application permissions `Mail.Send` and `Mail.ReadWrite`, grant admin consent, and paste the tenant ID, client ID and client secret.
    - **Google Workspace**: create a service account, enable the Gmail API, and authorize its client ID for `https://www.googleapis.com/auth/gmail.modify` under domain-wide delegation. Paste the JSON key.
-3. **Integrations**: add a validation key (MillionVerifier is the cheapest per check), and optionally a Cloudflare token (automatic DNS), a Slack webhook and a Spamhaus DQS key.
-4. **Domains → Add domains**: pick the provider and set (active or reserve), then add the personas.
-5. On each domain: write the DNS records, check them, then pass the header test and start warmup (or attest that warmup already started elsewhere). Domains in the active set start sending automatically once warm.
+3. **Integrations**: add a Cloudflare API token (Zone → Zone: Read and Zone → DNS: Edit, all zones) and a validation key (MillionVerifier is the cheapest per check). Optionally add a Slack webhook and a Spamhaus DQS key.
+4. **Domains → Add domains → Load my Cloudflare domains**: tick the sending domains (your primary domain is shown as protected and can't be picked), choose the provider and set (active or reserve), then add the personas.
+5. **Domains → Write DNS via Cloudflare** writes SPF, DMARC and MX for every new domain and checks them. Paste each domain's DKIM value from Google Admin or Microsoft Defender on its page, pass the header test, then **Start warmup**. Domains in the active set start sending automatically once warm.
 6. **Lists → Upload**, then **Campaigns → New**, write the copy, enroll the list and launch.
 7. Mark two connected inboxes (one Gmail, one Outlook) as **seeds** so diagnoses run automatically.
+
+> **Access you need from your mailbox vendor.** Cold talks to mailboxes through the providers' admin APIs: an Entra app with application permissions in each Microsoft 365 tenant, or a Google service account with domain-wide delegation. Both need **admin access to the tenant**. Ask Hypertide (or your vendor) whether you get tenant admin. If they only hand out mailbox passwords, Cold needs a per-mailbox sign-in flow, which isn't built yet.
 
 > The Graph, Gmail, MillionVerifier, ZeroBounce, Cloudflare, RDAP and Spamhaus adapters are written against those providers' public APIs. They are covered by the simulated end-to-end test but **have not yet been exercised against live tenants**. Run a small pilot (one domain, a few seed addresses) before scaling. Hypertide has no public API for Recovery Pool, Relay or Layover that this project could verify, so Cold tracks those states itself and raises "vendor task" reminders for you to mirror them in Hypertide.
 
@@ -85,22 +90,25 @@ What this means:
 
 Sources: [Google Workspace pricing (dupple)](https://dupple.com/learn/google-workspace-pricing), [Google Workspace pricing (dragapp)](https://www.dragapp.com/blog/google-workspace-pricing/), [Microsoft 365 pricing updates (Microsoft)](https://www.microsoft.com/en-us/licensing/news/2026-m365-packaging-pricing-updates), [Exchange Online plans (o365hq)](https://o365hq.com/md/blog/exchange-online-plan-1-vs-plan-2-vs-kiosk-vs-business-basic-mailbox-licensing), [Hypertide review (outreach2day)](https://outreach2day.com/reviews/hypertide), [Hypertide review (aerosend)](https://www.aerosend.io/review/hypertide/), [Hypertide Google](https://www.hypertide.io/google), [InboxKit comparison](https://www.inboxkit.com/learn/cold-email-infrastructure-comparison-2026), [Cold email infrastructure cost (maildeck)](https://maildeck.co/blog/cold-email-infrastructure-cost-2026/).
 
-## Deploy to Cloudflare
+## Deploy to Cloudflare (cold.cleargraph.co)
 
-Cold runs as one container on **Cloudflare Containers**, behind a small Worker (`infra/cloudflare`). The Worker routes every request to a single container instance and pings it every 5 minutes, so the background jobs (sender, inbox sync, health, rotation timers) keep running. Data lives in an external **PostgreSQL** database, because container disks are wiped on restart.
+Cold runs as one container on **Cloudflare Containers**, behind a small Worker (`infra/cloudflare`) served at **https://cold.cleargraph.co**. The Worker routes every request to a single container instance and pings it every 5 minutes, so the background jobs (sender, warmup, inbox sync, health, rotation timers) keep running. Data lives in an external **PostgreSQL** database, because container disks are wiped on restart.
 
-1. Create a Postgres database (e.g. [Neon](https://neon.com/pricing)) and copy its connection string (`...?sslmode=require`).
-2. Deploy (needs a Workers Paid plan and Docker running locally):
+The GitHub workflow does the whole deploy, so you don't need Docker or a terminal:
 
-```bash
-cd infra/cloudflare
-npm install
-npx wrangler secret put DATABASE_URL     # paste the Postgres URL
-npx wrangler secret put APP_SECRET       # paste: openssl rand -hex 32  (keep it safe: it decrypts stored credentials)
-npx wrangler deploy
-```
+1. **Database:** create a Postgres database (e.g. a [Neon](https://neon.com/pricing) project) and copy its connection string (`postgres://…?sslmode=require`).
+2. **Cloudflare API token:** start from the *Edit Cloudflare Workers* template and add *Account → Containers → Edit*. The `cleargraph.co` zone must be in the same account. Cloudflare creates the `cold.cleargraph.co` DNS record and certificate on deploy.
+3. **GitHub → Settings → Secrets and variables → Actions:** add these secrets:
+   - `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+   - `DATABASE_URL`
+   - `APP_SECRET`: `openssl rand -hex 32`. Keep a copy: it decrypts stored credentials.
+   - `SETUP_TOKEN`: any long random string.
+4. **Actions → Deploy to Cloudflare → Run workflow.** It checks the secrets, builds the image, uploads the secrets with the version, deploys and smoke-tests `/healthz`. Set the repository variable `CLOUDFLARE_DEPLOY=true` to deploy on every push to `main`.
+5. **Open https://cold.cleargraph.co.** Enter the setup token, create the owner account, and protect `cleargraph.co` as your primary domain. Only someone with the token can claim an empty instance.
 
-After that, `.github/workflows/deploy-cloudflare.yml` deploys on every push to `main`. Set the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and the variable `CLOUDFLARE_DEPLOY=true`. GitHub's runners have Docker, so you don't need it locally after the first deploy.
+Optional: put [Cloudflare Access](https://www.cloudflare.com/zero-trust/products/access/) in front of `cold.cleargraph.co` for SSO. It's free for up to 50 users.
+
+From a terminal instead, with Docker running: `cd infra/cloudflare && npm install`, `npx wrangler secret put` for `DATABASE_URL`, `APP_SECRET` and `SETUP_TOKEN`, then `npx wrangler deploy`.
 
 **Rough monthly cost**, from Cloudflare's published usage rates:
 
@@ -113,7 +121,7 @@ After that, `.github/workflows/deploy-cloudflare.yml` deploys on every push to `
 
 Keep `max_instances` at 1: the scheduler runs inside the container and must run once.
 
-> I couldn't run a real deploy from this environment (no Docker daemon, no Cloudflare account). `wrangler deploy --dry-run` validates the config and bundles the Worker. Container settings follow the `@cloudflare/containers` README and Wrangler's config schema. Check the first deploy's logs (`npx wrangler tail`).
+> I couldn't run a real deploy from this environment (no Docker daemon, no Cloudflare account). `wrangler deploy --dry-run` validates the config, custom domain and Worker bundle. Container settings follow the `@cloudflare/containers` README and Wrangler's config schema. Check the first deploy's logs (`npx wrangler tail`).
 
 **Other hosts.** The same image runs anywhere that runs Docker plus Postgres: `docker compose up` locally, or Azure Container Apps (`infra/azure/main.bicep`, manual workflow `deploy-azure.yml`).
 

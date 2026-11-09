@@ -72,6 +72,9 @@ export function AddDomainsWizard({ open, onClose, defaultPool = "active" }: { op
   const [result, setResult] = useState<AddResult | null>(null);
 
   const suggestions = useGet<Suggestion[]>(suggestKey);
+  const [zonesKey, setZonesKey] = useState<string | null>(null);
+  const zones = useGet<{ id: string; name: string; status: string; inCold: boolean; protected: boolean }[]>(zonesKey, { retry: false });
+  const importable = (zones.data ?? []).filter((z) => !z.inCold && !z.protected);
   const tenants = (integrations.data?.tenants ?? []).filter((t) => t.provider === provider);
   useEffect(() => {
     if (!tenantId && tenants.length > 0) setTenantId(tenants[0].id);
@@ -279,6 +282,59 @@ export function AddDomainsWizard({ open, onClose, defaultPool = "active" }: { op
           <Callout tone="blue" title="Use separate domains that resemble your brand" action={<RuleTag n={1} />}>
             Buy them at your registrar first (prefer .com), then list them here. Cold refuses your primary domain and its subdomains.
           </Callout>
+          <div className="rounded-xl border border-ink-200 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-ink-800">Already on Cloudflare?</p>
+                <p className="text-xs text-ink-500">Pick domains from your Cloudflare account. Cold writes their DNS records for you later.</p>
+              </div>
+              <Button onClick={() => setZonesKey(`/cloudflare/zones?t=${Date.now()}`)} loading={zones.isFetching}>
+                Load my Cloudflare domains
+              </Button>
+            </div>
+            {zones.error && (
+              <p className="mt-3 text-sm text-red-600">
+                {(zones.error as Error).message}{" "}
+                <Link to="/settings/integrations" className="underline">
+                  Open integrations
+                </Link>
+              </p>
+            )}
+            {zones.data && (
+              <>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {zones.data.map((z) => {
+                    const picked = names.includes(z.name);
+                    const disabled = z.inCold || z.protected;
+                    return (
+                      <button
+                        key={z.id}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => toggleName(z.name)}
+                        title={z.protected ? "Protected primary domain: never used for cold email" : z.inCold ? "Already in Cold" : z.status}
+                        className={clsx(
+                          "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-sm transition-colors",
+                          picked ? "border-brand-400 bg-brand-50 text-brand-800" : "border-ink-200 bg-white text-ink-700 hover:bg-ink-50",
+                          disabled && "cursor-not-allowed opacity-50 hover:bg-white",
+                        )}
+                      >
+                        <span className="mono text-[13px]">{z.name}</span>
+                        {z.protected && <Badge tone="green">protected</Badge>}
+                        {z.inCold && <Badge>added</Badge>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {importable.length > 0 && (
+                  <button type="button" className="mt-3 text-xs font-medium text-brand-600 hover:text-brand-700" onClick={() => setNamesText([...new Set([...names, ...importable.map((z) => z.name)])].join("\n"))}>
+                    Select all {importable.length} importable
+                  </button>
+                )}
+                {zones.data.length === 0 && <p className="mt-3 text-sm text-ink-500">No zones found for this token.</p>}
+              </>
+            )}
+          </div>
           <Field label="Domains" hint={`${plural(names.length, "domain")}. One per line, or separated by commas.`}>
             <Textarea value={namesText} onChange={(e) => setNamesText(e.target.value)} placeholder={"getacme.com\ntryacme.com"} className="mono min-h-32 text-[13px]" autoFocus />
           </Field>

@@ -18,9 +18,11 @@ export interface MailboxCtx {
 }
 
 export interface SimMeta {
-  kind: "first_touch" | "follow_up" | "seed" | "header_test" | "manual";
+  kind: "first_touch" | "follow_up" | "seed" | "header_test" | "manual" | "warmup";
   arm?: "control" | "campaign" | null;
   profile?: SimProfile | null;
+  /** Warmup: the receiving Cold mailbox (simulator delivers straight into it). */
+  recipientMailboxId?: string | null;
 }
 
 export interface SimProfile {
@@ -71,6 +73,10 @@ export interface Transport {
   /** Seed header test: raw headers of a received message. */
   rawHeaders(seed: MailboxCtx, rfcMessageId: string): Promise<string | null>;
   test(mailbox: MailboxCtx): Promise<{ ok: boolean; detail: string }>;
+  /** Warmup: move a message out of spam into the inbox and mark it read (and important). */
+  rescue(mailbox: MailboxCtx, providerMessageId: string): Promise<void>;
+  /** Warmup: mark a message read. */
+  markRead(mailbox: MailboxCtx, providerMessageId: string): Promise<void>;
 }
 
 export function headerMap(list: { name: string; value: string }[] | undefined): Record<string, string> {

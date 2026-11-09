@@ -84,6 +84,27 @@ export const simulatedTransport: Transport = {
       return { providerMessageId: `sim-${randomUUID()}`, providerThreadId, rfcMessageId: rfc };
     }
 
+    if (kind === "warmup" && msg.sim?.recipientMailboxId) {
+      // Deliver straight into the receiving simulated mailbox. Burned senders land in spam.
+      const r = rand();
+      const folder: "inbox" | "spam" = profile.placement === "burned" ? (r < 0.8 ? "spam" : "inbox") : r < 0.04 ? "spam" : "inbox";
+      enqueue(msg.sim.recipientMailboxId, {
+        providerThreadId: `sim-thread-${randomUUID()}`,
+        rfcMessageId: rfc,
+        inReplyTo: msg.inReplyTo ?? null,
+        references: msg.references ?? null,
+        from: m.address,
+        fromName: m.displayName,
+        to: msg.to,
+        subject: msg.subject,
+        body: msg.text,
+        headers: {},
+        folder,
+        delayMin: DELAY_MIN * 0.3,
+      });
+      return { providerMessageId: `sim-${randomUUID()}`, providerThreadId, rfcMessageId: rfc };
+    }
+
     if (kind === "first_touch" || kind === "follow_up") {
       const r = rand();
       const recipientDomain = msg.to.split("@")[1] ?? "example.com";
@@ -150,4 +171,8 @@ export const simulatedTransport: Transport = {
   async test(m: MailboxCtx) {
     return { ok: true, detail: `Simulated mailbox ${m.address}` };
   },
+
+  async rescue() {},
+
+  async markRead() {},
 };

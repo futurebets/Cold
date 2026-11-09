@@ -137,6 +137,15 @@ export const graphTransport: Transport = {
     return (hit.internetMessageHeaders ?? []).map((h: { name: string; value: string }) => `${h.name}: ${h.value}`).join("\n");
   },
 
+  async rescue(m: MailboxCtx, providerMessageId: string) {
+    const moved = await graph<{ id: string }>(m, "POST", `${u(m)}/messages/${encodeURIComponent(providerMessageId)}/move`, { destinationId: "inbox" });
+    await graph(m, "PATCH", `${u(m)}/messages/${encodeURIComponent(moved.id ?? providerMessageId)}`, { isRead: true, importance: "high" });
+  },
+
+  async markRead(m: MailboxCtx, providerMessageId: string) {
+    await graph(m, "PATCH", `${u(m)}/messages/${encodeURIComponent(providerMessageId)}`, { isRead: true });
+  },
+
   async test(m: MailboxCtx) {
     try {
       const me: any = await graph(m, "GET", `${u(m)}?$select=id,mail,userPrincipalName`);

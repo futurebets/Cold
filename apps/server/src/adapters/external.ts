@@ -63,6 +63,24 @@ export async function pushCloudflare(token: string, domain: string, records: Dns
   return out;
 }
 
+export interface CloudflareZone {
+  id: string;
+  name: string;
+  status: string;
+}
+
+/** All zones the token can see (needs Zone:Read). */
+export async function listCloudflareZones(token: string): Promise<CloudflareZone[]> {
+  const out: CloudflareZone[] = [];
+  for (let page = 1; page <= 40; page++) {
+    const res = await fetchJson(`${CF}/zones?per_page=50&page=${page}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.data?.success) throw new Error(res.data?.errors?.[0]?.message ?? `Cloudflare zones → ${res.status}`);
+    for (const z of res.data.result ?? []) out.push({ id: z.id, name: z.name, status: z.status });
+    if (page >= (res.data.result_info?.total_pages ?? 1)) break;
+  }
+  return out;
+}
+
 export async function testCloudflare(token: string): Promise<string> {
   const r = await cf(token, "GET", "/user/tokens/verify");
   return `Token ${r.status}`;

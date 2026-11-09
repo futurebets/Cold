@@ -13,6 +13,7 @@ interface Env {
   COLD: DurableObjectNamespace<ColdContainer>;
   DATABASE_URL: string;
   APP_SECRET: string;
+  SETUP_TOKEN?: string;
 }
 
 export class ColdContainer extends Container<Env> {
@@ -25,8 +26,10 @@ export class ColdContainer extends Container<Env> {
     this.envVars = {
       NODE_ENV: "production",
       PORT: "8080",
+      APP_URL: "https://cold.cleargraph.co",
       DATABASE_URL: env.DATABASE_URL,
       APP_SECRET: env.APP_SECRET,
+      ...(env.SETUP_TOKEN ? { SETUP_TOKEN: env.SETUP_TOKEN } : {}),
     };
   }
 }

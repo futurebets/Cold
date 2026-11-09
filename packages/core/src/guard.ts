@@ -7,7 +7,7 @@ import { DEFAULT_POLICIES } from "./policy";
 import type { Connection, DomainState, MailboxState, ProspectBucket, Provider, Seg, ValidationStatus } from "./types";
 import { authFresh, isProtected } from "./domains";
 
-export type SendKind = "first_touch" | "follow_up" | "seed" | "header_test";
+export type SendKind = "first_touch" | "follow_up" | "seed" | "header_test" | "warmup";
 
 export type SkipReason =
   | "PROTECTED_DOMAIN"
@@ -77,6 +77,7 @@ const SENDING_DOMAIN_STATES: Record<SendKind, DomainState[]> = {
   follow_up: ["active", "layover"],
   seed: ["active", "flagged", "diagnosing", "ready", "warming"],
   header_test: ["pending_dns", "auth_verified", "warming", "ready", "active", "flagged", "diagnosing", "auth_failed"],
+  warmup: ["warming", "ready", "active", "flagged", "diagnosing", "layover"],
 };
 
 const SENDING_MAILBOX_STATES: Record<SendKind, MailboxState[]> = {
@@ -84,6 +85,7 @@ const SENDING_MAILBOX_STATES: Record<SendKind, MailboxState[]> = {
   follow_up: ["active", "relay"],
   seed: ["active", "paused", "ready", "warming"],
   header_test: ["provisioning", "warming", "ready", "active", "paused"],
+  warmup: ["warming", "ready", "active", "paused"],
 };
 
 export function preflight(ctx: PreflightContext): { ok: boolean; reasons: SkipReason[] } {
@@ -100,13 +102,14 @@ export function preflight(ctx: PreflightContext): { ok: boolean; reasons: SkipRe
   if (!SENDING_DOMAIN_STATES[ctx.kind].includes(ctx.domain.state)) r.push("DOMAIN_NOT_SENDING");
   if (!SENDING_MAILBOX_STATES[ctx.kind].includes(ctx.mailbox.state)) r.push("MAILBOX_NOT_SENDING");
 
-  if (ctx.kind !== "header_test") {
+  // Warmup has its own daily quota and never counts toward cold-email caps (CAP-3).
+  if (ctx.kind !== "header_test" && ctx.kind !== "warmup") {
     // I-3
     if (ctx.caps.mailboxSent >= ctx.caps.mailboxCap) r.push("CAP_MAILBOX");
     if (ctx.caps.domainSent >= ctx.caps.domainCap) r.push("CAP_DOMAIN");
-    // I-4
-    if (!authFresh(ctx.domain.authVerifiedAt, policies, now)) r.push("AUTH_STALE");
   }
+  // I-4 (warmup too: an unauthenticated domain warms itself into spam)
+  if (ctx.kind !== "header_test" && !authFresh(ctx.domain.authVerifiedAt, policies, now)) r.push("AUTH_STALE");
   // I-5
   if ((ctx.kind === "first_touch" || ctx.kind === "follow_up") && ctx.mailbox.warmupDays < policies.warmup.minDays) r.push("WARMUP_INCOMPLETE");
 

@@ -8,6 +8,7 @@ import { getPolicies, getProtectedDomains, getSecret, loadTenant, mailboxCtx, ra
 import { checkDns, isSimulatedDomain, setState, submitHeaders } from "./domains";
 import { readControlTests } from "./diagnosis";
 import { advanceRotations } from "./rotation";
+import { updateWarmupRates } from "./warmup";
 
 const { domains, mailboxes, sends } = schema;
 
@@ -16,6 +17,7 @@ export async function runLifecycle(workspaceId: string, now = new Date()) {
   await reverifyAuth(workspaceId, now);
   await readSeedHeaderTests(workspaceId, now);
   await readControlTests(workspaceId, now);
+  await updateWarmupRates(workspaceId, now);
   await advanceRotations(workspaceId, now);
   await coverageAlerts(workspaceId);
   await expiryAlerts(workspaceId, now);

@@ -5,6 +5,7 @@
 //   cd infra/cloudflare && npm install
 //   npx wrangler secret put DATABASE_URL   # postgres://...?sslmode=require (Neon, Supabase, …)
 //   npx wrangler secret put APP_SECRET     # 32+ random characters, e.g. `openssl rand -hex 32`
+//   npx wrangler secret put SETUP_TOKEN    # any long random string; needed once to create the owner account
 //   npx wrangler deploy
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -12,6 +13,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+  // Served at https://cold.cleargraph.co (the cleargraph.co zone must be in the same Cloudflare account).
+  // Cloudflare creates the DNS record and certificate on deploy. The app itself never sends email
+  // from cleargraph.co: protect it as your primary domain during setup.
+  "routes": [{ "pattern": "cold.cleargraph.co", "custom_domain": true }],
+  "workers_dev": false,
   "containers": [
     {
       "class_name": "ColdContainer",

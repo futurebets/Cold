@@ -1,11 +1,15 @@
 name: Deploy to Cloudflare
 
-# Builds the Cold image and deploys it to Cloudflare Containers behind the Worker in infra/cloudflare.
-# One-time setup:
-#   1. Repository secrets: CLOUDFLARE_API_TOKEN (Workers Scripts:Edit + Containers:Edit), CLOUDFLARE_ACCOUNT_ID
-#   2. Worker secrets (once, from your machine): cd infra/cloudflare && npx wrangler secret put DATABASE_URL
-#                                                                     npx wrangler secret put APP_SECRET
-#   3. Repository variable CLOUDFLARE_DEPLOY = true to deploy on every push to main.
+# Builds the Cold image and deploys it to Cloudflare Containers behind the Worker in
+# infra/cloudflare, served at https://cold.cleargraph.co. No local Docker needed.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   API token: "Edit Cloudflare Workers" template, plus Account → Containers → Edit
+#   CLOUDFLARE_ACCOUNT_ID  your Cloudflare account ID
+#   DATABASE_URL           postgres://…?sslmode=require (Neon, Supabase, …)
+#   APP_SECRET             32+ random characters (openssl rand -hex 32). Keep it: it decrypts stored credentials.
+#   SETUP_TOKEN            any long random string, used once to create the owner account
+# Optional repository variable CLOUDFLARE_DEPLOY = true to deploy on every push to main.
 
 on:
   workflow_dispatch:
@@ -25,10 +29,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+        run: |
+          missing=""
+          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID DATABASE_URL APP_SECRET; do
+            [ -z "${!k}" ] && missing="$missing $k"
+          done
+          if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing"; exit 1; fi
+          if [ ${#APP_SECRET} -lt 32 ]; then echo "::error::APP_SECRET must be at least 32 characters"; exit 1; fi
       - run: npm ci
         working-directory: infra/cloudflare
-      - run: npx wrangler deploy
+      - name: Deploy (secrets are uploaded with the version)
         working-directory: infra/cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+        run: |
+          umask 077
+          node -e 'const s={};for(const k of ["DATABASE_URL","APP_SECRET","SETUP_TOKEN"]) if(process.env[k]) s[k]=process.env[k]; require("fs").writeFileSync(process.env.RUNNER_TEMP+"/cold-secrets.json", JSON.stringify(s));'
+          npx wrangler deploy --secrets-file "$RUNNER_TEMP/cold-secrets.json"
+          rm -f "$RUNNER_TEMP/cold-secrets.json"
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS https://cold.cleargraph.co/healthz; then echo; exit 0; fi
+            sleep 10
+          done
+          echo "::warning::https://cold.cleargraph.co/healthz didn't answer within 5 minutes. Check 'npx wrangler tail' and the container logs."

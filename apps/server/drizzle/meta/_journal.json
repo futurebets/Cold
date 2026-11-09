@@ -8,6 +8,13 @@
       "when": 1794253915611,
       "tag": "0000_red_squadron_sinister",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794258616391,
+      "tag": "0001_sweet_iron_monger",
+      "breakpoints": true
     }
   ]
 }

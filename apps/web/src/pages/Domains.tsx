@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { Globe, Plus, Search } from "lucide-react";
+import { Globe, Plus, Search, Wand2 } from "lucide-react";
 import { DEFAULT_POLICIES } from "@cold/core";
-import { useGet } from "../lib/api";
+import { post, useAction, useGet } from "../lib/api";
 import { num } from "../lib/format";
-import { Button, EmptyState, ErrorState, Input, Loading, PageHeader, Progress, Segmented, Stat, TableCard } from "../components/ui";
+import { Button, Callout, EmptyState, ErrorState, Input, Loading, Modal, PageHeader, Progress, Segmented, Stat, TableCard } from "../components/ui";
 import { DomainStateBadge, PoolBadge, ProviderLogo, VerdictBadge } from "../components/badges";
 import { AddDomainsWizard } from "../components/infra/AddDomainsWizard";
 import type { DomainListRow, PoliciesResponse } from "../components/infra/types";
@@ -21,6 +21,12 @@ export default function DomainsPage() {
   const [pool, setPool] = useState<PoolFilter>("all");
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
+  const integrations = useGet<{ cloudflare: boolean }>("/integrations");
+  const [dnsResults, setDnsResults] = useState<any[] | null>(null);
+  const bulkDns = useAction((ids: string[]) => post<any[]>("/domains/bulk-dns", { domainIds: ids }), {
+    invalidate: ["/domains"],
+    onSuccess: (r) => setDnsResults(r),
+  });
 
   const rows = q.data ?? [];
   const filtered = useMemo(
@@ -38,6 +44,7 @@ export default function DomainsPage() {
 
   if (q.isLoading) return <Loading />;
   if (q.error) return <ErrorState error={q.error} />;
+  const needsDns = rows.filter((d) => d.state === "pending_dns" || d.state === "auth_failed" || (d.state === "auth_verified" && !d.authVerifiedAt));
 
   return (
     <div className="space-y-6">
@@ -46,9 +53,16 @@ export default function DomainsPage() {
         rules={[1, 4]}
         description="Lookalike sending domains and their mailboxes. Each one moves through DNS → warmup → sending, and Cold blocks every step until the previous one passes."
         actions={
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>
-            Add domains
-          </Button>
+          <>
+            {integrations.data?.cloudflare && needsDns.length > 0 && (
+              <Button icon={<Wand2 className="size-4" />} loading={bulkDns.isPending} onClick={() => bulkDns.mutate(needsDns.map((d) => d.id))}>
+                Write DNS for {needsDns.length} via Cloudflare
+              </Button>
+            )}
+            <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>
+              Add domains
+            </Button>
+          </>
         }
       />
 
@@ -162,6 +176,28 @@ export default function DomainsPage() {
       )}
 
       <AddDomainsWizard open={adding} onClose={() => setAdding(false)} />
+      <Modal open={!!dnsResults} onClose={() => setDnsResults(null)} title="DNS written through Cloudflare" size="lg">
+        <div className="space-y-3">
+          <Callout tone="gray">SPF, DMARC and MX are written automatically. DKIM needs a value from your provider: Google Admin console for Google, Microsoft Defender for Microsoft. Paste it on each domain's page, then run this again.</Callout>
+          <ul className="divide-y divide-ink-100 rounded-lg border border-ink-200">
+            {(dnsResults ?? []).map((r) => (
+              <li key={r.id} className="px-3 py-2.5 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="mono font-medium">{r.name}</span>
+                  {!r.ok ? <span className="text-xs text-red-600">failed</span> : r.pass ? <span className="text-xs text-emerald-700">all checks pass</span> : <span className="text-xs text-amber-700">still failing: {r.failing.join(", ")}</span>}
+                </div>
+                {r.ok ? (
+                  <p className="mt-0.5 text-xs text-ink-500">
+                    {r.applied.length ? `Wrote ${r.applied.join(", ")}.` : "Nothing to write."} {r.skipped.filter((x: string) => x.includes("paste")).join(" ")} {r.warnings.join(" ")}
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-xs text-red-600">{r.error}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </Modal>
     </div>
   );
 }

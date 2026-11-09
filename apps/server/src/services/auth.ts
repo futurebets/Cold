@@ -3,6 +3,8 @@ import { and, eq, gt, sql } from "drizzle-orm";
 import type { Role } from "@cold/core";
 import { DEFAULT_CONTROL_MESSAGES, isValidDomainName, normalizeDomain } from "@cold/core";
 import { getDb, schema } from "../db/client";
+import { timingSafeEqual } from "node:crypto";
+import { config } from "../config";
 import { hashPassword, randomToken, sha256, verifyPassword } from "../lib/crypto";
 import { badRequest, conflict, forbidden, HttpError, notFound } from "../lib/http";
 import type { Actor } from "./common";
@@ -26,8 +28,19 @@ export async function createWorkspace(name: string, timezone = "America/New_York
   return ws;
 }
 
-export async function setup(input: { name: string; email: string; password: string; workspaceName: string; primaryDomain: string; timezone?: string }) {
+export function setupTokenRequired(): boolean {
+  return !!config.setupToken || config.production;
+}
+
+export async function setup(input: { name: string; email: string; password: string; workspaceName: string; primaryDomain: string; timezone?: string; setupToken?: string }) {
   if (!(await needsSetup())) throw forbidden("Setup has already been completed");
+  // On a public URL, whoever finishes setup first becomes the owner, so require a secret token.
+  if (setupTokenRequired()) {
+    if (!config.setupToken) throw forbidden("Set the SETUP_TOKEN secret on the server to finish setup.");
+    const given = Buffer.from(input.setupToken ?? "");
+    const expected = Buffer.from(config.setupToken);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw forbidden("Wrong setup token");
+  }
   validatePassword(input.password);
   const primary = normalizeDomain(input.primaryDomain);
   if (!isValidDomainName(primary)) throw badRequest("Enter your primary domain, e.g. acme.com");

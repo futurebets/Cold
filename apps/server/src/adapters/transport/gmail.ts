@@ -188,6 +188,14 @@ export const gmailTransport: Transport = {
     return (msg.payload?.headers ?? []).map((h: { name: string; value: string }) => `${h.name}: ${h.value}`).join("\n");
   },
 
+  async rescue(m: MailboxCtx, providerMessageId: string) {
+    await gmailOk(m, "POST", `/messages/${providerMessageId}/modify`, { addLabelIds: ["INBOX", "IMPORTANT"], removeLabelIds: ["SPAM", "UNREAD"] });
+  },
+
+  async markRead(m: MailboxCtx, providerMessageId: string) {
+    await gmailOk(m, "POST", `/messages/${providerMessageId}/modify`, { removeLabelIds: ["UNREAD"] });
+  },
+
   async test(m: MailboxCtx) {
     try {
       const p: any = await gmailOk(m, "GET", "/profile");

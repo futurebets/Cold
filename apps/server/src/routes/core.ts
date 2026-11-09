@@ -9,6 +9,7 @@ import { checkAvailability, testCloudflare } from "../adapters/external";
 import * as auth from "../services/auth";
 import { audit, getWorkspace, hasSecret, setSecret, setTenantSecret, tenantHasSecret } from "../services/common";
 import { overview, reserveView, setupChecklist } from "../services/overview";
+import { warmupOverview } from "../services/warmup";
 import { jobStatus, runJob } from "../jobs/runner";
 import { ctx, idParam, parse, z } from "./helpers";
 
@@ -17,14 +18,14 @@ const COOKIE = "cold_session";
 
 export async function coreRoutes(app: FastifyInstance) {
   // ───────────── Auth ─────────────
-  app.get("/api/auth/state", async (req) => ({ needsSetup: await auth.needsSetup(), demo: config.demo, user: req.auth ? { ...req.auth.user, role: req.auth.role, workspaceId: req.auth.workspaceId } : null }));
+  app.get("/api/auth/state", async (req) => ({ needsSetup: await auth.needsSetup(), setupTokenRequired: auth.setupTokenRequired(), demo: config.demo, user: req.auth ? { ...req.auth.user, role: req.auth.role, workspaceId: req.auth.workspaceId } : null }));
 
   const setCookie = (reply: any, token: string, maxAge: number) =>
     reply.setCookie(COOKIE, token, { path: "/", httpOnly: true, sameSite: "lax", secure: config.production, maxAge });
 
   app.post("/api/auth/setup", async (req, reply) => {
     const body = parse(
-      z.object({ name: z.string().min(1), email: z.string().email(), password: z.string(), workspaceName: z.string().min(1), primaryDomain: z.string().min(3), timezone: z.string().optional() }),
+      z.object({ name: z.string().min(1), email: z.string().email(), password: z.string(), workspaceName: z.string().min(1), primaryDomain: z.string().min(3), timezone: z.string().optional(), setupToken: z.string().optional() }),
       req.body,
     );
     const s = await auth.setup(body);
@@ -57,6 +58,7 @@ export async function coreRoutes(app: FastifyInstance) {
   app.get("/api/overview", async (req) => overview(ctx(req).workspaceId));
   app.get("/api/checklist", async (req) => setupChecklist(ctx(req).workspaceId));
   app.get("/api/reserve", async (req) => reserveView(ctx(req).workspaceId));
+  app.get("/api/warmup", async (req) => warmupOverview(ctx(req).workspaceId));
 
   // ───────────── Workspace settings ─────────────
   app.get("/api/settings", async (req) => {
@@ -77,13 +79,14 @@ export async function coreRoutes(app: FastifyInstance) {
         dmarcRua: z.string().email().or(z.literal("")).optional(),
         warmupPattern: z.string().max(200).optional(),
         onboardingDismissed: z.boolean().optional(),
+        warmupEngine: z.enum(["cold", "external"]).optional(),
         prices: z.record(z.string(), z.record(z.string(), z.number())).optional(),
       }),
       req.body,
     );
     const ws = await getWorkspace(c.workspaceId);
     const settings = { ...ws.settings };
-    for (const k of ["postalAddress", "dmarcRua", "warmupPattern", "onboardingDismissed", "prices"] as const) if (body[k] !== undefined) (settings as any)[k] = body[k];
+    for (const k of ["postalAddress", "dmarcRua", "warmupPattern", "onboardingDismissed", "prices", "warmupEngine"] as const) if (body[k] !== undefined) (settings as any)[k] = body[k];
     await getDb()
       .update(workspaces)
       .set({ ...(body.name ? { name: body.name } : {}), ...(body.timezone ? { timezone: body.timezone } : {}), settings })

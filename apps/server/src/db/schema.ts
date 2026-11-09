@@ -34,6 +34,8 @@ export const workspaces = pgTable("workspaces", {
       warmupPattern?: string;
       slackWebhookConfigured?: boolean;
       validationProvider?: "millionverifier" | "zerobounce" | "simulated" | "none";
+      /** "cold": built-in peer warmup (default). "external": warmup runs in another tool; Cold only tracks dates. */
+      warmupEngine?: "cold" | "external";
       dnsProvider?: "cloudflare" | "manual";
       simulation?: boolean;
       onboardingDismissed?: boolean;
@@ -368,7 +370,7 @@ export const sends = pgTable(
   {
     id: id(),
     workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-    kind: text("kind").$type<"first_touch" | "follow_up" | "seed" | "header_test">().notNull(),
+    kind: text("kind").$type<"first_touch" | "follow_up" | "seed" | "header_test" | "warmup">().notNull(),
     enrollmentId: text("enrollment_id").references(() => enrollments.id, { onDelete: "set null" }),
     campaignId: text("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     stepId: text("step_id"),
@@ -400,6 +402,10 @@ export const sends = pgTable(
     bounceType: text("bounce_type").$type<"hard" | "soft">(),
     bounceCategory: text("bounce_category").$type<BounceCategory>(),
     placement: text("placement").$type<"inbox" | "promotions" | "spam" | "missing">(),
+    /** Warmup: 0 = new conversation, 1+ = reply depth. */
+    warmupDepth: integer("warmup_depth"),
+    inReplyTo: text("in_reply_to"),
+    referencesHdr: text("references_hdr"),
   },
   (t) => [
     index("sends_domain_sent").on(t.domainId, t.sentAt),
@@ -408,6 +414,7 @@ export const sends = pgTable(
     index("sends_rfc").on(t.rfcMessageId),
     index("sends_enrollment").on(t.enrollmentId),
     index("sends_campaign_sent").on(t.campaignId, t.sentAt),
+    index("sends_kind_date").on(t.workspaceId, t.kind, t.localDate),
   ],
 );
 

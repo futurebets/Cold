@@ -35,6 +35,11 @@ import {
   suggestDomainNames,
   summarizePlacement,
   warmupStatus,
+  warmupDailyTarget,
+  pickWarmupRecipients,
+  warmupPoolHealth,
+  warmupMessage,
+  warmupInboxRate,
   DEFAULT_SCHEDULE,
   bounceComposition,
   type PreflightContext,
@@ -439,5 +444,48 @@ describe("placeholders", () => {
   it("blocks unfilled [placeholders]", () => {
     const r = lintCopy({ subject: "hi", body: "We help [who] do [what]. Interested?", isFirstTouch: true });
     expect(r.findings.filter((f) => f.rule === "placeholder").length).toBe(2);
+  });
+});
+
+describe("built-in warmup", () => {
+  it("ramps, holds, and eases off once sending", () => {
+    expect(warmupDailyTarget(0, "google", { active: false, weekend: false })).toBe(2);
+    expect(warmupDailyTarget(10, "google", { active: false, weekend: false })).toBe(12);
+    expect(warmupDailyTarget(60, "google", { active: false, weekend: false })).toBe(20);
+    expect(warmupDailyTarget(60, "microsoft", { active: false, weekend: false })).toBe(10);
+    expect(warmupDailyTarget(60, "google", { active: true, weekend: false })).toBe(10);
+    expect(warmupDailyTarget(60, "google", { active: false, weekend: true })).toBe(10);
+  });
+  it("never pairs inboxes on the same domain or tenant, and prefers the other provider", () => {
+    const m = (id: string, domainId: string, tenantId: string, provider: "google" | "microsoft") => ({ id, address: `${id}@x`, domainId, tenantId, provider });
+    const sender = m("a", "d1", "t1", "microsoft");
+    const pool = [sender, m("b", "d1", "t1", "microsoft"), m("c", "d2", "t1", "microsoft"), m("d", "d3", "t2", "microsoft"), m("e", "d4", "t3", "google")];
+    const picked = pickWarmupRecipients(sender, pool, 5, seededRandom("w"));
+    expect(picked.map((p) => p.id)).toEqual(["e", "d"]);
+  });
+  it("judges pool health", () => {
+    const one = warmupPoolHealth([{ id: "a", address: "a", domainId: "d1", tenantId: "t1", provider: "microsoft" }, { id: "b", address: "b", domainId: "d2", tenantId: "t1", provider: "microsoft" }]);
+    expect(one.canRun).toBe(false);
+    expect(one.issues.join(" ")).toMatch(/one tenant/);
+  });
+  it("writes link-free messages and computes inbox rate", () => {
+    const msg = warmupMessage(seededRandom("x"), { firstName: "Jane" }, { firstName: "Bob" });
+    expect(lintCopy({ subject: msg.subject, body: msg.body, isFirstTouch: false }).findings.filter((f) => f.rule === "no_links").length).toBe(0);
+    expect(msg.body).toContain("Bob");
+    expect(warmupInboxRate(["inbox", "inbox", "spam"], 3)).toBeCloseTo(2 / 3);
+    expect(warmupInboxRate(["inbox"], 10)).toBeNull();
+  });
+  it("lets warmup skip cold caps but not auth", () => {
+    const now = new Date();
+    const base = {
+      kind: "warmup" as const,
+      now,
+      protectedDomains: [],
+      domain: { name: "getacme.com", provider: "google", state: "warming" as const, authVerifiedAt: now },
+      mailbox: { state: "warming" as const, connection: "connected" as const, warmupDays: 1, address: "a@getacme.com" },
+      caps: { mailboxSent: 99, mailboxCap: 15, domainSent: 99, domainCap: 45 },
+    };
+    expect(preflight(base).ok).toBe(true);
+    expect(preflight({ ...base, domain: { ...base.domain, authVerifiedAt: null } }).reasons).toContain("AUTH_STALE");
   });
 });

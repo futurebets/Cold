@@ -16,6 +16,11 @@ function appSecret(): string {
   return s;
 }
 
+if (env.NODE_ENV === "production" && !env.DATABASE_URL && env.ALLOW_EMBEDDED_DB !== "true") {
+  // Container disks (Cloudflare, Azure, etc.) are wiped on restart; refuse to run on a throwaway database.
+  throw new Error("DATABASE_URL is required in production (set ALLOW_EMBEDDED_DB=true only for a persistent single-machine install)");
+}
+
 export const config = {
   port: Number(env.PORT ?? 8080),
   host: env.HOST ?? "0.0.0.0",
@@ -28,4 +33,6 @@ export const config = {
   /** Seeds a demo workspace with simulated mailboxes on first boot. */
   demo: env.DEMO === "true",
   publicDir: env.PUBLIC_DIR ?? null,
+  /** Required to complete first-run setup on a public URL (production). */
+  setupToken: env.SETUP_TOKEN || null,
 };

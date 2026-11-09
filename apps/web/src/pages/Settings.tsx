@@ -1,3 +1,4 @@
+import type React from "react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Lock, Play, Plus, Trash2 } from "lucide-react";
@@ -211,7 +212,7 @@ function Integrations({ role }: { role: string }) {
             <SecretField label="API key" saved={d.validationKey} value={keys.validationKey} onChange={(v) => setKeys({ ...keys, validationKey: v })} onSave={() => save.mutate({ validationKey: keys.validationKey })} onClear={() => save.mutate({ validationKey: null })} />
           </div>
         </Card>
-        <Card title={<span className="flex items-center gap-2">DNS <RuleTag n={5} /></span>} subtitle="With a Cloudflare API token (Zone:DNS:Edit), Cold writes SPF, DKIM, DMARC and MX records for you. Cloudflare DNS is free.">
+        <Card title={<span className="flex items-center gap-2">DNS <RuleTag n={5} /></span>} subtitle="With a Cloudflare API token (Zone → Zone: Read and Zone → DNS: Edit, all zones), Cold imports your domains and writes SPF, DKIM, DMARC and MX records for you.">
           <SecretField label="Cloudflare API token" saved={d.cloudflare} value={keys.cloudflareToken} onChange={(v) => setKeys({ ...keys, cloudflareToken: v })} onSave={() => save.mutate({ cloudflareToken: keys.cloudflareToken })} onClear={() => save.mutate({ cloudflareToken: null })} />
         </Card>
         <Card title="Slack alerts" subtitle="Critical alerts, rotations and positive replies posted to a channel via an incoming webhook.">
@@ -222,11 +223,80 @@ function Integrations({ role }: { role: string }) {
         </Card>
       </div>
 
+      <WarmupCard />
+
       <Card title="Simulation mode" subtitle="Simulates DNS, MX lookups and validation for this workspace. Use it to try Cold before connecting real tenants.">
         <Toggle checked={d.simulation} disabled={role !== "owner"} onChange={(v) => save.mutate({ simulation: v })} label={d.simulation ? "On: nothing is really validated or sent by simulated tenants" : "Off"} />
       </Card>
 
       {tenantModal && <TenantModal initial={tenantModal} onClose={() => setTenantModal(null)} />}
+    </div>
+  );
+}
+
+function WarmupCard() {
+  const q = useGet<any>("/warmup", { refetchInterval: 60_000 });
+  const save = useAction((engine: string) => put("/settings", { warmupEngine: engine }), { invalidate: ["/warmup"], success: "Warmup setting saved" });
+  const w = q.data;
+  return (
+    <Card
+      title={<span className="flex items-center gap-2">Warmup <RuleTag n={6} /></span>}
+      subtitle="Built in: your inboxes warm each other, so there's no warmup subscription (Instantly, Lemwarm…) to pay for."
+    >
+      {!w ? (
+        <Loading />
+      ) : (
+        <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              { v: "cold", t: "Built-in warmup (recommended)", d: "Inboxes exchange natural emails with inboxes in your other tenants, rescue each other from spam and reply. Placement feeds the Ready gate and early warnings." },
+              { v: "external", t: "Another warmup tool", d: "You run warmup elsewhere. Cold only tracks warmup age and blocks sending until 14 days." },
+            ].map((o) => (
+              <button
+                key={o.v}
+                type="button"
+                onClick={() => w.engine !== o.v && save.mutate(o.v)}
+                className={clsx("rounded-xl border p-3 text-left transition-colors", w.engine === o.v ? "border-brand-400 bg-brand-50 ring-2 ring-brand-100" : "border-ink-200 hover:bg-ink-50")}
+              >
+                <p className="text-sm font-medium text-ink-900">{o.t}</p>
+                <p className="mt-1 text-xs text-ink-500">{o.d}</p>
+              </button>
+            ))}
+          </div>
+          {w.engine === "cold" && (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <MiniStat label="Inboxes in pool" value={w.pool.inboxes} />
+                <MiniStat label="Tenants" value={w.pool.tenants} />
+                <MiniStat label="Warmup emails · 7d" value={w.last7d.sent} />
+                <MiniStat label="Reached inbox" value={w.last7d.inboxRate == null ? "–" : `${Math.round(w.last7d.inboxRate * 100)}%`} />
+                <MiniStat label="Replies · 7d" value={w.last7d.replies} />
+              </div>
+              {w.pool.issues.length > 0 && (
+                <Callout tone={w.pool.canRun ? "gray" : "amber"} title={w.pool.canRun ? "Ways to strengthen warmup" : "Warmup can't run yet"}>
+                  <ul className="list-disc space-y-0.5 pl-4">
+                    {w.pool.issues.map((i: string) => (
+                      <li key={i}>{i}</li>
+                    ))}
+                  </ul>
+                </Callout>
+              )}
+              <p className="text-xs text-ink-500">
+                Trade-off: a paid network spreads warmup across thousands of other companies' inboxes. A private pool is free, but its signal comes only from your own tenants, so keep both Google and Microsoft inboxes in it. Volumes and reply rate are under Guardrails → Warmup.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-ink-200 px-3 py-2">
+      <p className="text-[11px] text-ink-500">{label}</p>
+      <p className="text-lg font-semibold tabular-nums">{value}</p>
     </div>
   );
 }

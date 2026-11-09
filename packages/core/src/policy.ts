@@ -55,7 +55,13 @@ export const POLICY_DEFS: PolicyDef[] = [
   // Warmup
   { key: "warmup.minDays", group: "Warmup", label: "Minimum warmup", description: "Never send from an inbox warmed for less than two weeks.", type: "number", default: 14, source: "playbook", rule: 6, override: "hard_floor", min: 14, max: 120, unit: "days" },
   { key: "warmup.targetDays", group: "Warmup", label: "Recommended warmup", description: "A month is better.", type: "number", default: 30, source: "playbook", rule: 6, override: "free", min: 14, max: 120, unit: "days" },
-  { key: "warmup.minInboxRate", group: "Warmup", label: "Minimum warmup inbox rate", description: "If your warmup tool reports placement, require at least this inbox rate to become Ready.", type: "percent", default: 0.9, source: "proposed", override: "free", min: 0, max: 1 },
+  { key: "warmup.minInboxRate", group: "Warmup", label: "Minimum warmup inbox rate", description: "Warmup emails that must land in the inbox (not spam) for an inbox to become Ready.", type: "percent", default: 0.9, source: "proposed", override: "free", min: 0, max: 1 },
+  { key: "warmup.dailyMaxGoogle", group: "Warmup", label: "Google: warmup emails per inbox per day", description: "Built-in warmup ramps up to this many per inbox.", type: "number", default: 20, source: "proposed", override: "free", min: 2, max: 50, unit: "emails" },
+  { key: "warmup.dailyMaxMicrosoft", group: "Warmup", label: "Microsoft: warmup emails per inbox per day", description: "Built-in warmup ramps up to this many per inbox.", type: "number", default: 10, source: "proposed", override: "free", min: 2, max: 40, unit: "emails" },
+  { key: "warmup.rampPerDay", group: "Warmup", label: "Warmup ramp", description: "Extra warmup emails per inbox per day of warmup, starting from 2.", type: "number", default: 1, source: "proposed", override: "free", min: 0.25, max: 5, unit: "per day" },
+  { key: "warmup.replyRate", group: "Warmup", label: "Warmup reply rate", description: "Share of warmup emails the receiving inbox replies to.", type: "percent", default: 0.35, source: "proposed", override: "free", min: 0, max: 0.8 },
+  { key: "warmup.activeShare", group: "Warmup", label: "Warmup while sending", description: "Warmup volume kept on inboxes that send cold email, as a share of the full volume.", type: "percent", default: 0.5, source: "proposed", override: "free", min: 0, max: 1 },
+  { key: "warmup.earlyWarningRate", group: "Warmup", label: "Early warning: warmup inbox rate below", description: "Alert when an active domain's warmup emails start landing in spam. Often the first sign a domain is burning.", type: "percent", default: 0.75, source: "proposed", override: "free", min: 0.3, max: 0.99 },
 
   // Reserve
   { key: "reserve.ratio", group: "Reserve", label: "Reserve ratio", description: "Warmed reserve capacity to keep per unit of active capacity (two infrastructure sets = 1.0).", type: "number", default: 1, source: "playbook", rule: 7, override: "free", min: 0, max: 3 },
@@ -115,7 +121,17 @@ export interface Policies {
     microsoft: { mailboxesPerDomainMax: number; perMailboxDaily: number; perDomainDaily: number };
   };
   auth: { reverifyHours: number; dmarcPolicy: "none" | "quarantine" | "reject" };
-  warmup: { minDays: number; targetDays: number; minInboxRate: number };
+  warmup: {
+    minDays: number;
+    targetDays: number;
+    minInboxRate: number;
+    dailyMaxGoogle: number;
+    dailyMaxMicrosoft: number;
+    rampPerDay: number;
+    replyRate: number;
+    activeShare: number;
+    earlyWarningRate: number;
+  };
   reserve: { ratio: number; autoReplenish: "off" | "draft" };
   lists: { validationTtlDays: number; blockedSegs: string[]; unknownWithCatchAll: boolean; providerSkewWarn: number };
   copy: { maxWordsWarn: number; maxWordsBlock: number; signatureMaxLines: number };

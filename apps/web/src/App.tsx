@@ -20,9 +20,9 @@ import ActivityPage from "./pages/Activity";
 import SettingsPage from "./pages/Settings";
 
 export function App() {
-  const state = useGet<{ needsSetup: boolean; demo?: boolean; user: { id: string; name: string; email: string; role: string } | null }>("/auth/state", { staleTime: 60_000 });
+  const state = useGet<{ needsSetup: boolean; setupTokenRequired?: boolean; demo?: boolean; user: { id: string; name: string; email: string; role: string } | null }>("/auth/state", { staleTime: 60_000 });
   if (state.isLoading) return <Loading label="Starting Cold…" />;
-  if (state.data?.needsSetup) return <SetupPage />;
+  if (state.data?.needsSetup) return <SetupPage tokenRequired={!!state.data.setupTokenRequired} />;
   if (!state.data?.user) return <LoginPage demo={state.data?.demo} />;
   return (
     <Routes>

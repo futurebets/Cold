@@ -9,6 +9,7 @@ import { notFound } from "../lib/http";
 import { transportFor, type InboundItem } from "../adapters/transport";
 import { getPolicies, getWorkspace, mailboxCtx, notify, raiseAlert } from "./common";
 import { suppress } from "./lists";
+import { findWarmupSend, handleWarmupInbound } from "./warmup";
 
 const { mailboxes, domains, tenants, sends, enrollments, threads, messages, prospects } = schema;
 type MailboxRow = typeof mailboxes.$inferSelect;
@@ -84,6 +85,12 @@ export async function ingest(mb: MailboxRow, item: InboundItem): Promise<boolean
     .where(and(eq(messages.mailboxId, mb.id), eq(messages.providerMessageId, item.providerMessageId)))
     .limit(1);
   if (dupe) return false;
+  // Warmup mail between Cold's own inboxes: record placement, engage, maybe reply. Never shown in the inbox.
+  const warm = await findWarmupSend(mb.workspaceId, item);
+  if (warm) {
+    await handleWarmupInbound(mb, item, warm);
+    return false;
+  }
   const ws = await getWorkspace(mb.workspaceId);
   const policies = await getPolicies(mb.workspaceId);
   const warmupPattern = ws.settings.warmupPattern ? safeRegex(ws.settings.warmupPattern) : undefined;

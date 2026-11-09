@@ -175,9 +175,9 @@ The send pipeline enforces these at plan time **and** again in a final pre-fligh
 |---|---|
 | WRM-1 | **[P#6]** A mailbox MUST complete **at least 14 days** of warmup before any campaign send. This is a hard floor: policy may raise it but never lower it. The recommended target is **30 days**. Mailboxes show **Ready (minimum)** at 14–29 days and **Ready (recommended)** at 30+ days. |
 | WRM-2 | Warmup age counts only days on which warmup was running and reported healthy. Paused days do not count. |
-| WRM-3 | Warmup runs through a warmup-provider adapter: start, pause, resume, set volume, and read metrics (sent, received, inbox rate and spam rate where the provider exposes them). |
+| WRM-3 | **Built-in warmup (default):** Cold's inboxes warm each other. Ramped daily volume (2/day + 1/day, up to 20 Google / 10 Microsoft), natural link-free messages, pairs only across different tenants and domains (intra-tenant mail builds no reputation), receivers rescue from spam, mark read and reply to ~35%, threads up to 3 messages. Placement of every warmup email gives a per-inbox warmup inbox rate. An external warmup tool can be used instead; Cold then only tracks warmup age. |
 | WRM-4 | **[Proposed]** Where the provider reports placement, a mailbox needs a trailing-7-day warmup inbox rate of at least 90% to become `READY`. |
-| WRM-5 | **[Proposed]** Warmup continues on active mailboxes by default. Its volume does not count toward cold caps. |
+| WRM-5 | **[Proposed]** Warmup continues on active mailboxes at 50% volume by default. Its volume does not count toward cold caps. An active domain whose warmup inbox rate falls below 75% raises an early warning, usually days before reply and bounce rates move. |
 | WRM-6 | **[P#6]** "Never start sending immediately": a mailbox that isn't `READY` cannot be assigned to a campaign. The UI shows a countdown ("Ready in 9 days") instead of an assign button. |
 
 ### 6.6 Infrastructure sets and reserve [P#7]

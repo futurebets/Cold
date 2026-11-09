@@ -90,9 +90,9 @@ export function LoginPage({ demo }: { demo?: boolean }) {
 
 const TIMEZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Australia/Sydney", "Asia/Singapore"];
 
-export function SetupPage() {
+export function SetupPage({ tokenRequired = false }: { tokenRequired?: boolean }) {
   const qc = useQueryClient();
-  const [f, setF] = useState({ name: "", email: "", password: "", workspaceName: "", primaryDomain: "", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York" });
+  const [f, setF] = useState({ setupToken: "", name: "", email: "", password: "", workspaceName: "", primaryDomain: "", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
@@ -115,6 +115,11 @@ export function SetupPage() {
       <h1 className="text-2xl font-semibold tracking-tight text-ink-900">Set up Cold</h1>
       <p className="mt-1 text-sm text-ink-500">Create the owner account and protect your primary domain. It takes a minute.</p>
       <form onSubmit={submit} className="mt-6 space-y-4">
+        {tokenRequired && (
+          <Field label="Setup token" hint="The SETUP_TOKEN secret you set when deploying. It stops anyone else who finds this URL from claiming the workspace.">
+            <Input type="password" value={f.setupToken} onChange={set("setupToken")} required autoComplete="off" />
+          </Field>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Your name">
             <Input value={f.name} onChange={set("name")} required autoFocus />

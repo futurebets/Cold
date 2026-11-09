@@ -448,7 +448,13 @@ async function deliver(send: SendRow, now: Date): Promise<"sent" | "skipped" | "
     return "skipped";
   }
 
-  const counted = kind !== "header_test";
+  // Warmup has its own quota (planWarmup) and never uses cold-email capacity (CAP-3).
+  const counted = kind !== "header_test" && kind !== "warmup";
+  if (kind === "warmup") {
+    inReplyTo = send.inReplyTo;
+    references = send.referencesHdr;
+    providerThreadId = send.providerThreadId;
+  }
   if (counted) {
     if (!(await incrementCap("mailbox", mb.id, date, mbCap))) {
       await skip(send, ["CAP_MAILBOX" satisfies SkipReason]);
@@ -473,7 +479,13 @@ async function deliver(send: SendRow, now: Date): Promise<"sent" | "skipped" | "
       inReplyTo,
       references,
       providerThreadId,
-      sim: { kind, arm: send.arm, profile: simProfile(ws, domain) },
+      sim: {
+        kind,
+        arm: send.arm,
+        profile: simProfile(ws, domain),
+        recipientMailboxId:
+          kind === "warmup" ? ((await db.select({ id: mailboxes.id }).from(mailboxes).where(and(eq(mailboxes.workspaceId, send.workspaceId), eq(mailboxes.address, send.toAddress))))[0]?.id ?? null) : null,
+      },
     });
     await db
       .update(sends)

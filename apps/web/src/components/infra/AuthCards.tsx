@@ -2,7 +2,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import { Cloud, Pencil, RefreshCw, Send } from "lucide-react";
 import type { DnsRecord, HeaderTestAnalysis } from "@cold/core";
-import { patch, post, useAction } from "../../lib/api";
+import { patch, post, useAction, useGet } from "../../lib/api";
 import { ago, dateTime } from "../../lib/format";
 import { Badge, Button, Callout, Card, Check, CopyButton, Field, Input, Modal, RuleTag, Textarea } from "../ui";
 import type { DomainDetail } from "./types";
@@ -279,11 +279,14 @@ export function HeaderTestCard({ detail }: { detail: DomainDetail }) {
 
 export function WarmupCard({ detail }: { detail: DomainDetail }) {
   const d = detail.domain;
+  const warm = useGet<any>("/warmup");
+  const builtIn = (warm.data?.engine ?? "cold") === "cold";
+  const stats = warm.data?.domains?.find((x: any) => x.domainId === d.id);
   const [already, setAlready] = useState(false);
   const [since, setSince] = useState("");
   const start = useAction(() => post(`/domains/${d.id}/start-warmup`, { since: already && since ? new Date(since).toISOString() : null }), {
     invalidate: ["/domains", "/reserve"],
-    success: "Warmup tracking started",
+    success: builtIn ? "Warmup started" : "Warmup tracking started",
   });
   const live = detail.mailboxes.filter((m) => m.state !== "decommissioned");
   const min = live[0]?.warmup.min ?? 14;
@@ -304,8 +307,15 @@ export function WarmupCard({ detail }: { detail: DomainDetail }) {
       {!started ? (
         <div className="space-y-4">
           <p className="text-sm text-ink-600">
-            Turn on warmup in your warmup tool (or Hypertide) for every mailbox on this domain, then start tracking here. Cold won't let these inboxes send cold email until they reach {min} days.
+            {builtIn
+              ? `Cold warms these inboxes itself, with no warmup tool to pay for. They exchange natural emails with inboxes in your other tenants, pull each other out of spam and reply. Cold won't let them send cold email until they reach ${min} days.`
+              : `Turn on warmup in your warmup tool for every mailbox on this domain, then start tracking here. Cold won't let these inboxes send cold email until they reach ${min} days.`}
           </p>
+          {builtIn && warm.data && !warm.data.pool.canRun && (
+            <Callout tone="amber" title="The warmup pool can't run yet">
+              {warm.data.pool.issues.join(" ")}
+            </Callout>
+          )}
           <label className="flex items-center gap-2 text-sm text-ink-700">
             <input type="checkbox" checked={already} onChange={(e) => setAlready(e.target.checked)} className="size-4 rounded border-ink-300" />
             Warmup is already running in another tool
@@ -328,7 +338,7 @@ export function WarmupCard({ detail }: { detail: DomainDetail }) {
             </ul>
           )}
           <Button variant="primary" disabled={!canStart || (already && !since) || live.length === 0} loading={start.isPending} onClick={() => start.mutate()}>
-            {live.length === 0 ? "Add mailboxes first" : "Start warmup tracking"}
+            {live.length === 0 ? "Add mailboxes first" : builtIn ? "Start warmup" : "Start warmup tracking"}
           </Button>
         </div>
       ) : (
@@ -352,6 +362,24 @@ export function WarmupCard({ detail }: { detail: DomainDetail }) {
             )}
             <span className="absolute right-0 whitespace-nowrap">{target}d recommended</span>
           </div>
+          {builtIn && (
+            <div className="grid grid-cols-3 gap-3 border-t border-ink-100 pt-3 text-sm">
+              <div>
+                <p className="text-xs text-ink-500">Warmup emails · 7d</p>
+                <p className="font-semibold tabular-nums">{stats?.sent ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500">Reached the inbox</p>
+                <p className={clsx("font-semibold tabular-nums", stats?.inboxRate == null ? "text-ink-400" : stats.inboxRate >= 0.9 ? "text-emerald-700" : stats.inboxRate >= 0.75 ? "text-amber-700" : "text-red-700")}>
+                  {stats?.inboxRate == null ? "–" : `${Math.round(stats.inboxRate * 100)}%`}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-ink-500">Replies sent</p>
+                <p className="font-semibold tabular-nums">{stats?.replies ?? 0}</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </Card>
