@@ -1,0 +1,32 @@
+// Cold on Cloudflare: one Worker in front of one always-on container.
+// The container is the same image as everywhere else (repo-root Dockerfile).
+//
+// First deploy (needs Docker running locally, or use .github/workflows/deploy-cloudflare.yml):
+//   cd infra/cloudflare && npm install
+//   npx wrangler secret put DATABASE_URL   # postgres://...?sslmode=require (Neon, Supabase, …)
+//   npx wrangler secret put APP_SECRET     # 32+ random characters, e.g. `openssl rand -hex 32`
+//   npx wrangler deploy
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cold",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "ColdContainer",
+      "image": "../../Dockerfile",
+      "image_build_context": "../..",
+      // basic = 1/4 vCPU, 1 GiB memory, 4 GB disk. Enough for Cold; raise to standard-1 for very large lists.
+      "instance_type": "basic",
+      // Exactly one: Cold's scheduler runs in-process and must run once.
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "class_name": "ColdContainer", "name": "COLD" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ColdContainer"] }],
+  // Wakes the container (if it ever stopped) so sending, inbox sync and health checks keep running.
+  "triggers": { "crons": ["*/5 * * * *"] }
+}

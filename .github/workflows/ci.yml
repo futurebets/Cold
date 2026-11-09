@@ -32,3 +32,6 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/cold_test
       - run: npm run build
+      - name: Cloudflare Worker typecheck
+        working-directory: infra/cloudflare
+        run: npm ci && npm run typecheck

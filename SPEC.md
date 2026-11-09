@@ -127,7 +127,7 @@ The send pipeline enforces these at plan time **and** again in a final pre-fligh
 | PRV-3 | A sending domain has exactly one provider. MX, SPF and DKIM are provider-specific, so Google and Microsoft mailboxes never share a domain. |
 | PRV-4 | Mailbox provisioning sets the persona (first and last name, local-part pattern such as `first@` or `first.last@`), display name, and a plain-text signature validated by the copy linter (CPY-4). A profile photo is optional. |
 | PRV-5 | Mailboxes connect via OAuth: Google domain-wide delegation through a service account; Microsoft app-only auth with `Mail.Send` and `Mail.ReadWrite`, scoped to the sending mailboxes. Connection health is checked every 15 min. A failure sets the mailbox to `DISCONNECTED`, which removes it from scheduling. |
-| PRV-6 | **[P#3]** The capacity planner (CAP-6) shows both providers side by side: Microsoft is typically **5–6× cheaper** per unit of sending capacity, and Google is **easier to manage**. The ratio is computed from current price inputs and is not hard-coded. |
+| PRV-6 | **[P#3]** The capacity planner (CAP-6) shows both providers side by side and separates three ratios: price **per inbox**, price **per daily send** (inbox price ÷ its daily cap, 15 for Google vs 3 for Microsoft), and **total** cost including reserves and domains. *Research note (Nov 2026):* the playbook's "5–6× cheaper" holds per inbox for bulk Azure inboxes bought through resellers (~$0.50–1) vs Google Workspace seats ($7–8.40). Per email the gap is smaller (~1.4–2.8×), and Microsoft licenses bought directly from Microsoft (Exchange Online Plan 1 ~$4, Business Basic $7) cost more per email than Google. Ratios are computed from editable price presets, never hard-coded. |
 
 ### 6.3 Capacity planning and volume caps [P#3, P#4, P#7]
 
@@ -729,7 +729,7 @@ REST + JSON, workspace-scoped, authenticated with OAuth or SSO session tokens or
 6. **Warmup during active sending.** Continue warmup on active mailboxes (WRM-5)? At what volume?
 7. **Burned domains.** Retire permanently (this spec's assumption), or try rehabilitation through warmup-only rest?
 8. **Jurisdictions at launch.** Which compliance profiles must ship in v1 (CMP-2)? This needs legal review.
-9. **Price inputs.** Who maintains the planner's price table, and how often?
+9. **Price inputs.** The planner ships presets researched in November 2026, each with sources and a confidence label. Who refreshes them, and how often? Reseller prices (Hypertide etc.) are third-party reports and need confirming with the vendor.
 
 ---
 

@@ -1,0 +1,19 @@
+{
+  "name": "cold-cloudflare",
+  "private": true,
+  "description": "Runs the Cold container on Cloudflare Containers behind a Worker.",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261109.1",
+    "typescript": "~5.9.3",
+    "wrangler": "^4.159.0"
+  }
+}

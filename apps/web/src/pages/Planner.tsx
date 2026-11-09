@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowRight, Save, RotateCcw } from "lucide-react";
-import type { PlanResult, PriceInputs, Provider } from "@cold/core";
-import { compareProviders, DEFAULT_POLICIES, EXAMPLE_PRICES } from "@cold/core";
+import { ArrowRight, Save, RotateCcw, ExternalLink } from "lucide-react";
+import type { PlanResult, PriceInputs, PricePreset, Provider } from "@cold/core";
+import { compareProviders, costPerDailySend, DEFAULT_POLICIES, EXAMPLE_PRICES, planCapacity, pricesFromPreset, PRICE_PRESETS } from "@cold/core";
 import { put, useAction, useGet } from "../lib/api";
 import { money, num } from "../lib/format";
-import { Badge, Button, Callout, Card, Field, Input, LinkButton, PageHeader, RuleTag, Toggle } from "../components/ui";
+import { Badge, Button, Callout, Card, Field, Input, LinkButton, PageHeader, RuleTag, Select, TableCard, Toggle } from "../components/ui";
 import { ProviderLogo } from "../components/badges";
 import type { PoliciesResponse, SettingsResponse } from "../components/infra/types";
 
@@ -17,10 +17,15 @@ const PRICE_FIELDS: { key: keyof PriceInputs; label: string; step: number; hint?
   { key: "domainYearly", label: "Domain registration / year", step: 0.5 },
   { key: "warmupPerMailboxMonthly", label: "Warmup per mailbox / month", step: 0.1 },
   { key: "validationPerEmail", label: "Validation per address", step: 0.0005 },
-  { key: "platformMonthly", label: "Cold on Azure / month", step: 1 },
+  { key: "platformMonthly", label: "Cold hosting / month", step: 1, hint: "Cloudflare Workers Paid + one container. Add your database." },
 ];
 
 type Prices = Record<Provider, PriceInputs>;
+
+/** The preset whose inbox prices match, or "custom". */
+function matchPreset(p: Provider, prices: PriceInputs): string {
+  return PRICE_PRESETS.find((x) => x.provider === p && x.mailboxMonthly === prices.mailboxMonthly && x.reserveMailboxMonthly === prices.reserveMailboxMonthly)?.id ?? "custom";
+}
 
 function mergePrices(saved?: Record<string, Record<string, number>>): Prices {
   return {
@@ -51,7 +56,9 @@ export default function PlannerPage() {
   useEffect(() => {
     if (policiesQ.data) {
       setReserveRatio(policiesQ.data.effective.reserve.ratio);
-      setMsBoxes(policiesQ.data.effective.caps.microsoft.mailboxesPerDomainMax);
+      const max = policiesQ.data.effective.caps.microsoft.mailboxesPerDomainMax;
+      const preset = PRICE_PRESETS.find((x) => x.id === matchPreset("microsoft", prices.microsoft));
+      setMsBoxes(Math.min(max, preset?.mailboxesPerDomain ?? max));
     }
   }, [policiesQ.data]);
 
@@ -70,6 +77,13 @@ export default function PlannerPage() {
   ];
 
   const setPrice = (p: Provider, key: keyof PriceInputs, v: string) => setPrices({ ...prices, [p]: { ...prices[p], [key]: Number(v) || 0 } });
+  const applyPreset = (p: Provider, id: string) => {
+    const preset = PRICE_PRESETS.find((x) => x.id === id);
+    if (!preset) return;
+    setPrices({ ...prices, [p]: { ...prices[p], ...pricesFromPreset(id) } });
+    if (p === "microsoft" && preset.mailboxesPerDomain) setMsBoxes(Math.min(policies.caps.microsoft.mailboxesPerDomainMax, preset.mailboxesPerDomain));
+  };
+  const selected: Record<Provider, string> = { google: matchPreset("google", prices.google), microsoft: matchPreset("microsoft", prices.microsoft) };
 
   return (
     <div className="space-y-6">
@@ -103,12 +117,35 @@ export default function PlannerPage() {
             </div>
           </Card>
 
+          <Card title="Where you buy inboxes" subtitle="Researched November 2026. Pick the closest offer, then adjust the numbers below to your quote.">
+            <div className="space-y-5">
+              {(["google", "microsoft"] as Provider[]).map((p) => {
+                const preset = PRICE_PRESETS.find((x) => x.id === selected[p]);
+                return (
+                  <div key={p}>
+                    <Field label={<span className="flex items-center gap-1.5"><ProviderLogo provider={p} className="size-3.5" /> {p === "google" ? "Google" : "Microsoft"}</span>}>
+                      <Select value={selected[p]} onChange={(e) => applyPreset(p, e.target.value)}>
+                        {PRICE_PRESETS.filter((x) => x.provider === p).map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.label} · ${x.mailboxMonthly}/inbox
+                          </option>
+                        ))}
+                        {selected[p] === "custom" && <option value="custom">Custom prices</option>}
+                      </Select>
+                    </Field>
+                    {preset && <PresetNote preset={preset} />}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
           <Card
             title="Prices"
-            subtitle="Example prices. Replace them with your own quotes."
+            subtitle="Edit any number to match your quotes."
             actions={
               <Button size="sm" variant="ghost" icon={<RotateCcw className="size-3.5" />} onClick={() => setPrices(mergePrices())}>
-                Examples
+                Reset
               </Button>
             }
             footer={
@@ -150,10 +187,13 @@ export default function PlannerPage() {
         </div>
 
         <div className="min-w-0 space-y-6">
-          {targetDaily > 0 && ratio != null && (
-            <Callout tone="blue" title={ratio >= 1 ? `Microsoft is ${ratio.toFixed(1)}× cheaper on infrastructure at these prices` : `Google is ${(1 / ratio).toFixed(1)}× cheaper on infrastructure at these prices`} action={<RuleTag n={3} />}>
-              Microsoft packs up to {policies.caps.microsoft.mailboxesPerDomainMax} inboxes per domain at {policies.caps.microsoft.perMailboxDaily}/day each. Google is easier to manage but caps at{" "}
-              {policies.caps.google.mailboxesPerDomain} inboxes × {policies.caps.google.perMailboxDaily}/day per domain, so it needs many more domains.
+          {targetDaily > 0 && ratio != null && plan.perInboxRatio != null && plan.perSendRatio != null && (
+            <Callout tone={ratio >= 1 ? "blue" : "amber"} title={ratio >= 1 ? `Microsoft is ${ratio.toFixed(1)}× cheaper overall at these prices` : `Google is ${(1 / ratio).toFixed(1)}× cheaper overall at these prices`} action={<RuleTag n={3} />}>
+              <p>
+                <Ratio x={plan.perInboxRatio} /> per inbox, but a Microsoft inbox sends {policies.caps.microsoft.perMailboxDaily}/day vs {policies.caps.google.perMailboxDaily}/day for Google, so per email it's <Ratio x={plan.perSendRatio} />. Reserve inboxes and domain count
+                make up the rest: Microsoft needs {num(plan.microsoft.totalDomains)} domains here, Google {num(plan.google.totalDomains)}.
+              </p>
+              <p className="mt-1.5">Microsoft only wins on cost through bulk “Azure” resellers. Licenses bought from Microsoft cost more per email than Google.</p>
             </Callout>
           )}
 
@@ -162,6 +202,8 @@ export default function PlannerPage() {
               <ProviderPlan key={p} r={plan[p]} best={cheaper === p && targetDaily > 0} infraCost={infra(plan[p])} />
             ))}
           </div>
+
+          <AllOptions targetDaily={targetDaily} includeSaturday={includeSaturday} reserveRatio={reserveRatio} policies={policies} base={prices} />
 
           <Card title="Monthly cost breakdown" subtitle="Infrastructure plus validation and hosting.">
             <div className="h-64">
@@ -253,3 +295,90 @@ function ProviderPlan({ r, best, infraCost }: { r: PlanResult; best: boolean; in
     </section>
   );
 }
+
+function Ratio({ x }: { x: number }) {
+  return <strong className="font-semibold text-ink-900">{x >= 1 ? `Microsoft ${x.toFixed(1)}× cheaper` : `Google ${(1 / x).toFixed(1)}× cheaper`}</strong>;
+}
+
+function PresetNote({ preset }: { preset: PricePreset }) {
+  return (
+    <div className="mt-2 space-y-1.5 text-xs text-ink-500">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {preset.confidence === "vendor" ? <Badge tone="green">Vendor list price</Badge> : <Badge tone="amber">Reported, confirm with vendor</Badge>}
+        <span>
+          Reserve inbox ${preset.reserveMailboxMonthly}/mo{preset.mailboxesPerDomain && preset.provider === "microsoft" ? ` · ${preset.mailboxesPerDomain} inboxes/domain` : ""}
+        </span>
+      </div>
+      <p>{preset.note}</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+        {preset.sources.map((s) => (
+          <a key={s.url} href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand-600 hover:text-brand-700">
+            {s.label} <ExternalLink className="size-3" />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Every researched option at the current volume, cheapest first. */
+function AllOptions({ targetDaily, includeSaturday, reserveRatio, policies, base }: { targetDaily: number; includeSaturday: boolean; reserveRatio: number; policies: typeof DEFAULT_POLICIES; base: Prices }) {
+  const rows = PRICE_PRESETS.map((p) => {
+    const r = planCapacity({
+      targetDaily,
+      provider: p.provider,
+      includeSaturday,
+      reserveRatio,
+      mailboxesPerDomain: p.mailboxesPerDomain,
+      prices: { ...base[p.provider], ...pricesFromPreset(p.id) },
+      policies,
+    });
+    const infra = r.cost.mailboxes + r.cost.reserve + r.cost.domains + r.cost.warmup;
+    return { p, r, infra, perEmail: r.monthlySends ? (infra / r.monthlySends) * 1000 : 0, perSend: costPerDailySend(p.provider, p.mailboxMonthly, policies) };
+  }).sort((a, b) => a.infra - b.infra);
+  if (targetDaily <= 0) return null;
+  return (
+    <Card title={`Every option at ${num(targetDaily)} emails/day`} subtitle="Mailboxes (active + reserve), domains and warmup. Cheapest first." padded={false}>
+      <TableCard className="rounded-none border-0 shadow-none">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th className="text-right">Inbox</th>
+              <th className="text-right">Daily send</th>
+              <th className="text-right">Inboxes · dom.</th>
+              <th className="text-right">Per month</th>
+              <th className="text-right">Per 1k emails</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ p, r, infra, perEmail, perSend }, i) => (
+              <tr key={p.id} className={i === 0 ? "bg-emerald-50/50" : undefined}>
+                <td className="min-w-44">
+                  <div className="flex items-start gap-2">
+                    <ProviderLogo provider={p.provider} className="mt-0.5 size-3.5 shrink-0" />
+                    <div>
+                      <p className="font-medium text-ink-800">{p.label}</p>
+                      <p className={p.confidence === "vendor" ? "text-[11px] text-emerald-700" : "text-[11px] text-amber-700"}>{p.confidence === "vendor" ? "vendor list price" : "reported, confirm with vendor"}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="text-right tabular-nums">{money(p.mailboxMonthly, 2)}</td>
+                <td className="text-right tabular-nums">{money(perSend, 2)}</td>
+                <td className="text-right whitespace-nowrap tabular-nums">
+                  {num(r.totalMailboxes)} · {num(r.totalDomains)}
+                </td>
+                <td className="text-right font-semibold tabular-nums">{money(infra)}</td>
+                <td className="text-right tabular-nums">{money(perEmail, 2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableCard>
+      <p className="border-t border-ink-100 px-5 py-3 text-xs text-ink-500">
+        “Per daily send” is the inbox price divided by its daily cap ({policies.caps.google.perMailboxDaily} for Google, {policies.caps.microsoft.perMailboxDaily} for Microsoft): the number that decides which provider is cheaper per email. Anything you pay per inbox, such as a warmup tool, scales with inbox count, and Microsoft needs ~5× more inboxes for the same volume.
+      </p>
+    </Card>
+  );
+}
+

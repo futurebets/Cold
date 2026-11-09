@@ -1,0 +1,34 @@
+name: Deploy to Cloudflare
+
+# Builds the Cold image and deploys it to Cloudflare Containers behind the Worker in infra/cloudflare.
+# One-time setup:
+#   1. Repository secrets: CLOUDFLARE_API_TOKEN (Workers Scripts:Edit + Containers:Edit), CLOUDFLARE_ACCOUNT_ID
+#   2. Worker secrets (once, from your machine): cd infra/cloudflare && npx wrangler secret put DATABASE_URL
+#                                                                     npx wrangler secret put APP_SECRET
+#   3. Repository variable CLOUDFLARE_DEPLOY = true to deploy on every push to main.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-cloudflare
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.CLOUDFLARE_DEPLOY == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: infra/cloudflare
+      - run: npx wrangler deploy
+        working-directory: infra/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

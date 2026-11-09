@@ -1,4 +1,4 @@
-name: Deploy to Azure
+name: Deploy to Azure (alternative host)
 
 # Builds the image, pushes it to GitHub Container Registry, and rolls the Azure Container App.
 # One-time setup:
@@ -8,10 +8,9 @@ name: Deploy to Azure
 #        AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
 #   3. Add repository variables: AZURE_RESOURCE_GROUP (e.g. cold-rg), AZURE_CONTAINER_APP (e.g. cold)
 
+# Manual only. The default deployment target is Cloudflare (deploy-cloudflare.yml).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read

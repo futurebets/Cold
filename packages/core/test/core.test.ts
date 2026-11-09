@@ -8,6 +8,7 @@ import {
   classifyMx,
   cleanCompanyName,
   compareProviders,
+  costPerDailySend,
   countSpfLookups,
   decide,
   DEFAULT_POLICIES,
@@ -25,6 +26,7 @@ import {
   planRotation,
   planSlots,
   preflight,
+  pricesFromPreset,
   renderTemplate,
   reserveCoverage,
   resolvePolicies,
@@ -77,10 +79,21 @@ describe("capacity (rule 3, 4, 7)", () => {
     expect(google.daysToFirstVerdictPerDomain).toBe(25);
     expect(microsoft.daysToFirstVerdictPerDomain).toBe(9);
   });
-  it("shows Microsoft cheaper with example prices", () => {
-    const r = compareProviders({ targetDaily: 1000 });
-    expect(r.infraCostRatio).toBeGreaterThan(3);
+  it("separates per-inbox from per-email savings (Nov 2026 presets)", () => {
+    const at = (g: string, m: string) => compareProviders({ targetDaily: 1000, prices: { google: pricesFromPreset(g), microsoft: pricesFromPreset(m) } });
+    // Bulk "Azure" reseller vs Google direct: 7× cheaper per inbox, but only 1.4× per daily send (3/day vs 15/day).
+    const bulk = at("google-direct-annual", "ms-bulk-reseller");
+    expect(bulk.perInboxRatio).toBeCloseTo(7);
+    expect(bulk.perSendRatio).toBeCloseTo(1.4);
+    expect(bulk.infraCostRatio).toBeGreaterThan(2); // Recovery Pool reserves + fewer domains widen the gap
+    // Buying Microsoft licenses directly is more expensive per email than Google.
+    expect(at("google-direct-annual", "ms-exchange-p1").infraCostRatio).toBeLessThan(1);
+    expect(at("google-direct-annual", "ms-business-basic").infraCostRatio).toBeLessThan(0.5);
+    // Per-inbox Outlook resellers lose to per-inbox Google resellers.
+    expect(at("google-reseller", "ms-per-inbox-reseller").infraCostRatio).toBeLessThan(1);
     expect(planCapacity({ targetDaily: 0, provider: "google" }).activeDomains).toBe(0);
+    expect(costPerDailySend("google", 7)).toBeCloseTo(0.4667, 3);
+    expect(costPerDailySend("microsoft", 1)).toBeCloseTo(0.3333, 3);
   });
 });
 

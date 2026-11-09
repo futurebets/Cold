@@ -62,33 +62,60 @@ npm run build       # web + server bundle in apps/server/dist
 
 > The Graph, Gmail, MillionVerifier, ZeroBounce, Cloudflare, RDAP and Spamhaus adapters are written against those providers' public APIs. They are covered by the simulated end-to-end test but **have not yet been exercised against live tenants**. Run a small pilot (one domain, a few seed addresses) before scaling. Hypertide has no public API for Recovery Pool, Relay or Layover that this project could verify, so Cold tracks those states itself and raises "vendor task" reminders for you to mirror them in Hypertide.
 
-## Deploy to Azure
+## Mailbox costs: Google Workspace vs Microsoft 365
 
-One container serves the API, web app and background jobs. It runs on **Azure Container Apps** with **Azure Database for PostgreSQL Flexible Server (Burstable B1ms)**.
+Researched November 2026 (the in-app **Planner** has these as presets, with sources, and you can edit every number).
+
+| Option | Per inbox / month | Sends per inbox / day | Per daily send | 1,000 emails/day incl. warmed reserve |
+|---|---|---|---|---|
+| Bulk “Azure” Microsoft inboxes via reseller (e.g. Hypertide), reserves free in Recovery Pool | ~$1 reported ($0.50 in older reports) | 3 | $0.33 | **~$376/mo** (700 inboxes, 28 domains) |
+| Google inboxes via cold-email reseller | ~$3 ($2.50–3.50) | 15 | $0.20 | ~$456/mo (138 inboxes, 46 domains) |
+| Google Workspace Business Starter, annual | $7 | 15 | $0.47 | ~$1,008/mo |
+| Google Workspace Business Starter, monthly | $8.40 | 15 | $0.56 | ~$1,201/mo |
+| Microsoft per-inbox Outlook resellers | ~$3 ($2.25–4.50) | 3 | $1.00 | ~$2,113/mo |
+| Exchange Online Plan 1, bought from Microsoft | ~$4 | 3 | $1.33 | ~$2,813/mo |
+| Microsoft 365 Business Basic, bought from Microsoft | $7 (from July 1, 2026) | 3 | $2.33 | ~$4,913/mo |
+
+What this means:
+
+- **The “Azure is 5–6× cheaper” rule is about the price per inbox, and only through bulk resellers.** A bulk Azure inbox (~$1) is ~7× cheaper than a Google Workspace seat, but the playbook lets it send 3 emails a day instead of 15, so per email it is only ~1.4× cheaper. The rest of the gap comes from free reserve inboxes and needing fewer domains (28 vs 46 here). At ~$0.50 per inbox the overall saving is ~5×.
+- **Buying Microsoft licenses directly from Microsoft is the most expensive way to send cold email**: 3–5× Google per email.
+- **Google through a reseller is close to bulk Azure** (~$456 vs ~$376 at 1,000/day), with far fewer inboxes to manage. Anything priced per inbox (warmup tools, seats) is multiplied ~5× on Microsoft.
+- Reseller prices are third-party reports. Confirm current pricing, and how the inboxes are licensed, with the vendor before buying.
+
+Sources: [Google Workspace pricing (dupple)](https://dupple.com/learn/google-workspace-pricing), [Google Workspace pricing (dragapp)](https://www.dragapp.com/blog/google-workspace-pricing/), [Microsoft 365 pricing updates (Microsoft)](https://www.microsoft.com/en-us/licensing/news/2026-m365-packaging-pricing-updates), [Exchange Online plans (o365hq)](https://o365hq.com/md/blog/exchange-online-plan-1-vs-plan-2-vs-kiosk-vs-business-basic-mailbox-licensing), [Hypertide review (outreach2day)](https://outreach2day.com/reviews/hypertide), [Hypertide review (aerosend)](https://www.aerosend.io/review/hypertide/), [Hypertide Google](https://www.hypertide.io/google), [InboxKit comparison](https://www.inboxkit.com/learn/cold-email-infrastructure-comparison-2026), [Cold email infrastructure cost (maildeck)](https://maildeck.co/blog/cold-email-infrastructure-cost-2026/).
+
+## Deploy to Cloudflare
+
+Cold runs as one container on **Cloudflare Containers**, behind a small Worker (`infra/cloudflare`). The Worker routes every request to a single container instance and pings it every 5 minutes, so the background jobs (sender, inbox sync, health, rotation timers) keep running. Data lives in an external **PostgreSQL** database, because container disks are wiped on restart.
+
+1. Create a Postgres database (e.g. [Neon](https://neon.com/pricing)) and copy its connection string (`...?sslmode=require`).
+2. Deploy (needs a Workers Paid plan and Docker running locally):
 
 ```bash
-az group create -n cold-rg -l eastus
-az deployment group create -g cold-rg -f infra/azure/main.bicep -p \
-  image=ghcr.io/<owner>/cold:latest \
-  appSecret=$(openssl rand -hex 32) \
-  dbAdminPassword='<strong password>' \
-  registryServer=ghcr.io registryUsername=<github user> registryPassword=<PAT with read:packages>
+cd infra/cloudflare
+npm install
+npx wrangler secret put DATABASE_URL     # paste the Postgres URL
+npx wrangler secret put APP_SECRET       # paste: openssl rand -hex 32  (keep it safe: it decrypts stored credentials)
+npx wrangler deploy
 ```
 
-After the first deploy, `.github/workflows/deploy.yml` builds and pushes the image to GHCR and rolls the app on every push to `main`. The workflow file lists the one-time setup it needs (OIDC federated credential, secrets and variables).
+After that, `.github/workflows/deploy-cloudflare.yml` deploys on every push to `main`. Set the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and the variable `CLOUDFLARE_DEPLOY=true`. GitHub's runners have Docker, so you don't need it locally after the first deploy.
 
-**Rough monthly cost at list prices** (check the Azure pricing calculator for your region):
+**Rough monthly cost**, from Cloudflare's published usage rates:
 
-| Resource | Size | ≈ / month |
-|---|---|---|
-| Container Apps | 1 replica, 0.5 vCPU / 1 GiB, always on | $15–35 |
-| PostgreSQL Flexible | B1ms + 32 GB | $15–20 |
-| Log Analytics | light usage | $0–5 |
-| **Total platform** | | **≈ $30–60** |
+| Item | ≈ / month |
+|---|---|
+| Workers Paid plan | $5 |
+| One `basic` container (1/4 vCPU, 1 GiB) always on: memory ~$6.35, disk ~$0.70, CPU billed on active use (light) | $7–9 |
+| PostgreSQL: Neon Free (100 compute-hours/month; Cold polls every 30s so it may run out before month end) or Neon Launch (~$0.106 per compute-hour) | $0–20 |
+| **Total platform** | **≈ $12–35** |
 
-Mailboxes, domains and validation credits are separate. Use **Planner** in the app to compare Google vs Microsoft with your own vendor quotes. The default cost-saving setup is Microsoft mailboxes, reserve domains in Hypertide's Recovery Pool, free Cloudflare DNS, free MX/SEG checks before paid validation, and validation caching.
+Keep `max_instances` at 1: the scheduler runs inside the container and must run once.
 
-Keep the app at **exactly one replica**: the scheduler runs in-process. To scale the web tier, run extra replicas with `JOBS_ENABLED=false`.
+> I couldn't run a real deploy from this environment (no Docker daemon, no Cloudflare account). `wrangler deploy --dry-run` validates the config and bundles the Worker. Container settings follow the `@cloudflare/containers` README and Wrangler's config schema. Check the first deploy's logs (`npx wrangler tail`).
+
+**Other hosts.** The same image runs anywhere that runs Docker plus Postgres: `docker compose up` locally, or Azure Container Apps (`infra/azure/main.bicep`, manual workflow `deploy-azure.yml`).
 
 ## Layout
 
@@ -96,6 +123,7 @@ Keep the app at **exactly one replica**: the scheduler runs in-process. To scale
 packages/core      domain logic + unit tests (shared by server and browser)
 apps/server        Fastify API, Drizzle schema/migrations, adapters, services, jobs, demo seed, e2e test
 apps/web           React + Vite + Tailwind UI
-infra/azure        Bicep for Container Apps + PostgreSQL
+infra/cloudflare   Worker + wrangler config for Cloudflare Containers (default host)
+infra/azure        Bicep for Azure Container Apps + PostgreSQL (alternative host)
 SPEC.md            product specification
 ```
