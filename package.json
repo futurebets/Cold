@@ -1,0 +1,27 @@
+{
+  "name": "cold",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cold email deliverability platform: provisioning, guardrails, health, diagnosis and rotation.",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,magenta \"npm run dev -w @cold/server\" \"npm run dev -w @cold/web\"",
+    "build": "npm run build -w @cold/web && npm run build -w @cold/server",
+    "start": "node apps/server/dist/index.js",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @cold/server",
+    "demo": "npm run demo -w @cold/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "~5.9.3"
+  }
+}
