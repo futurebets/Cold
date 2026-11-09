@@ -94,7 +94,22 @@ Sources: [Google Workspace pricing (dupple)](https://dupple.com/learn/google-wor
 
 Cold runs as one container on **Cloudflare Containers**, behind a small Worker (`infra/cloudflare`) served at **https://cold.cleargraph.co**. The Worker routes every request to a single container instance and pings it every 5 minutes, so the background jobs (sender, warmup, inbox sync, health, rotation timers) keep running. Data lives in an external **PostgreSQL** database, because container disks are wiped on restart.
 
-The GitHub workflow does the whole deploy, so you don't need Docker or a terminal:
+**Fastest: one script from your own terminal.** It needs Node 20+, Docker running, and a Cloudflare login (it opens one if needed):
+
+```bash
+bash scripts/setup-cloudflare.sh          # from a Cold checkout, or anywhere: it clones the repo
+```
+
+It asks for your Postgres connection string, generates `APP_SECRET` and `SETUP_TOKEN`, and saves all three to `~/.cold/cold.cleargraph.co.env` (owner-only; back it up). Then it:
+
+- builds and deploys to `cold.cleargraph.co`, uploading the secrets with the deploy
+- waits for the site to come up
+- creates your owner account, with `cleargraph.co` protected
+- optionally connects Cloudflare DNS and MillionVerifier inside Cold, and copies the secrets to GitHub
+
+Re-run it any time to redeploy. `--skip-deploy` only configures a running app.
+
+**Or without a terminal: the GitHub workflow** does the deploy, so you don't need Docker:
 
 1. **Database:** create a Postgres database (e.g. a [Neon](https://neon.com/pricing) project) and copy its connection string (`postgres://…?sslmode=require`).
 2. **Cloudflare API token:** start from the *Edit Cloudflare Workers* template and add *Account → Containers → Edit*. The `cleargraph.co` zone must be in the same account. Cloudflare creates the `cold.cleargraph.co` DNS record and certificate on deploy.
